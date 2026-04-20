@@ -52,23 +52,57 @@ static int compare_tree_entries(const void *a, const void *b) {
     return strcmp(((const TreeEntry *)a)->name, ((const TreeEntry *)b)->name);
 }
 
-int tree_serialize(const Tree *tree, void **data_out, size_t *len_out) {
-    size_t max_size = tree->count * 296;
-    uint8_t *buffer = malloc(max_size);
-    if (!buffer) return -1;
-    Tree sorted_tree = *tree;
-    qsort(sorted_tree.entries, sorted_tree.count, sizeof(TreeEntry), compare_tree_entries);
-    size_t offset = 0;
-    for (int i = 0; i < sorted_tree.count; i++) {
-        const TreeEntry *entry = &sorted_tree.entries[i];
-        int written = sprintf((char *)buffer + offset, "%o %s", entry->mode, entry->name);
-        offset += written + 1;
-        memcpy(buffer + offset, entry->hash.hash, HASH_SIZE);
-        offset += HASH_SIZE;
+
+
+static int write_tree_level(IndexEntry *entries, int count, const char *prefix, ObjectID *id_out) {
+    Tree tree;
+    tree.count = 0;
+    int i = 0;
+    while (i < count) {
+        const char *rel = entries[i].path + strlen(prefix);
+        const char *slash = strchr(rel, '/');
+        if (slash == NULL) {
+            TreeEntry *entry = &tree.entries[tree.count];
+            strncpy(entry->name, rel, sizeof(entry->name) - 1);
+            entry->name[sizeof(entry->name) - 1] = '\0';
+            entry->mode = entries[i].mode;
+            entry->hash = entries[i].hash;
+            tree.count++;
+            i++;
+        } else {
+            size_t dir_name_len = slash - rel;
+            char dir_name[256];
+            strncpy(dir_name, rel, dir_name_len);
+            dir_name[dir_name_len] = '\0';
+            char sub_prefix[512];
+            snprintf(sub_prefix, sizeof(sub_prefix), "%s%s/", prefix, dir_name);
+            int sub_count = 0;
+            int j = i;
+            while (j < count && strncmp(entries[j].path, sub_prefix, strlen(sub_prefix)) == 0) { sub_count++; j++; }
+            ObjectID sub_tree_id;
+            if (write_tree_level(entries + i, sub_count, sub_prefix, &sub_tree_id) != 0) return -1;
+            TreeEntry *entry = &tree.entries[tree.count];
+            strncpy(entry->name, dir_name, sizeof(entry->name) - 1);
+            entry->name[sizeof(entry->name) - 1] = '\0';
+            entry->mode = MODE_DIR;
+            entry->hash = sub_tree_id;
+            tree.count++;
+            i += sub_count;
+        }
     }
-    *data_out = buffer;
-    *len_out = offset;
-    return 0;
+    void *tree_data;
+    size_t tree_len;
+    if (tree_serialize(&tree, &tree_data, &tree_len) != 0) return -1;
+    int rc = object_write(OBJ_TREE, tree_data, tree_len, id_out);
+    free(tree_data);
+    return rc;
 }
 
-
+int tree_from_index(ObjectID *id_out) {
+    Index index;
+    memset(&index, 0, sizeof(index));
+    if (index_load(&index) != 0) return -1;
+    if (index.count == 0) { fprintf(stderr, "error: nothing to commit\n"); return -1; }
+    return write_tree_level(index.entries, index.count, "", id_out);
+}
+ENDOFFILE
