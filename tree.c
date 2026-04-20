@@ -1,4 +1,4 @@
-cat > tree.c << 'ENDOFFILE'
+
 #include "tree.h"
 #include "index.h"
 #include <stdio.h>
@@ -105,4 +105,4 @@ int tree_from_index(ObjectID *id_out) {
     if (index.count == 0) { fprintf(stderr, "error: nothing to commit\n"); return -1; }
     return write_tree_level(index.entries, index.count, "", id_out);
 }
-ENDOFFILE
+
