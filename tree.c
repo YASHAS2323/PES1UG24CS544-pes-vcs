@@ -52,7 +52,24 @@ static int compare_tree_entries(const void *a, const void *b) {
     return strcmp(((const TreeEntry *)a)->name, ((const TreeEntry *)b)->name);
 }
 
-
+int tree_serialize(const Tree *tree, void **data_out, size_t *len_out) {
+    size_t max_size = tree->count * 296;
+    uint8_t *buffer = malloc(max_size);
+    if (!buffer) return -1;
+    Tree sorted_tree = *tree;
+    qsort(sorted_tree.entries, sorted_tree.count, sizeof(TreeEntry), compare_tree_entries);
+    size_t offset = 0;
+    for (int i = 0; i < sorted_tree.count; i++) {
+        const TreeEntry *entry = &sorted_tree.entries[i];
+        int written = sprintf((char *)buffer + offset, "%o %s", entry->mode, entry->name);
+        offset += written + 1;
+        memcpy(buffer + offset, entry->hash.hash, HASH_SIZE);
+        offset += HASH_SIZE;
+    }
+    *data_out = buffer;
+    *len_out = offset;
+    return 0;
+}
 
 static int write_tree_level(IndexEntry *entries, int count, const char *prefix, ObjectID *id_out) {
     Tree tree;
